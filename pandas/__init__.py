@@ -105,6 +105,7 @@ from pandas.core.api import (
     Series,
     DataFrame,
 )
+from pandas.core.col import col
 
 from pandas.core.dtypes.dtypes import SparseDtype
 
@@ -164,6 +165,7 @@ from pandas.io.api import (
     read_stata,
     read_sas,
     read_spss,
+    read_iceberg,
 )
 
 from pandas.io.json._normalize import json_normalize
@@ -280,6 +282,7 @@ __all__ = [
     "array",
     "arrays",
     "bdate_range",
+    "col",
     "concat",
     "crosstab",
     "cut",
@@ -319,6 +322,7 @@ __all__ = [
     "read_fwf",
     "read_hdf",
     "read_html",
+    "read_iceberg",
     "read_json",
     "read_orc",
     "read_parquet",

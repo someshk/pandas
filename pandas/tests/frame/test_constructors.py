@@ -2780,6 +2780,19 @@ class TestDataFrameConstructors:
         )
         tm.assert_frame_equal(result, expected)
 
+    def test_dataframe_from_array_like_with_name_attribute(self):
+        # GH#61443
+        class DummyArray(np.ndarray):
+            def __new__(cls, input_array):
+                obj = np.asarray(input_array).view(cls)
+                obj.name = "foo"
+                return obj
+
+        dummy = DummyArray(np.eye(3))
+        df = DataFrame(dummy)
+        expected = DataFrame(np.eye(3))
+        tm.assert_frame_equal(df, expected)
+
 
 class TestDataFrameConstructorIndexInference:
     def test_frame_from_dict_of_series_overlapping_monthly_period_indexes(self):
@@ -3234,7 +3247,6 @@ class TestFromScalar:
         assert item.asm8.dtype == exp_dtype
         assert dtype == exp_dtype
 
-    @pytest.mark.skip_ubsan
     def test_out_of_s_bounds_datetime64(self, constructor):
         scalar = np.datetime64(np.iinfo(np.int64).max, "D")
         result = constructor(scalar)
@@ -3270,7 +3282,6 @@ class TestFromScalar:
         assert item.asm8.dtype == exp_dtype
         assert dtype == exp_dtype
 
-    @pytest.mark.skip_ubsan
     @pytest.mark.parametrize("cls", [np.datetime64, np.timedelta64])
     def test_out_of_s_bounds_timedelta64(self, constructor, cls):
         scalar = cls(np.iinfo(np.int64).max, "D")

@@ -251,6 +251,24 @@ cdef bint checknull_with_nat_and_na(object obj):
 
 @cython.wraparound(False)
 @cython.boundscheck(False)
+def is_pdna_or_none(values: ndarray) -> ndarray:
+    cdef:
+        ndarray[uint8_t] result
+        Py_ssize_t i, N
+        object val
+
+    N = len(values)
+    result = np.zeros(N, dtype=np.uint8)
+
+    for i in range(N):
+        val = values[i]
+        if val is None or val is C_NA:
+            result[i] = True
+    return result.view(bool)
+
+
+@cython.wraparound(False)
+@cython.boundscheck(False)
 def is_numeric_na(values: ndarray) -> ndarray:
     """
     Check for NA values consistent with IntegerArray/FloatingArray.
@@ -471,6 +489,10 @@ class NAType(C_NAType):
             return False
         elif other is True or other is C_NA:
             return NA
+        elif util.is_bool_object(other):
+            if not other:
+                return False
+            return NA
         return NotImplemented
 
     __rand__ = __and__
@@ -480,12 +502,16 @@ class NAType(C_NAType):
             return True
         elif other is False or other is C_NA:
             return NA
+        elif util.is_bool_object(other):
+            if not other:
+                return NA
+            return True
         return NotImplemented
 
     __ror__ = __or__
 
     def __xor__(self, other):
-        if other is False or other is True or other is C_NA:
+        if util.is_bool_object(other) or other is C_NA:
             return NA
         return NotImplemented
 

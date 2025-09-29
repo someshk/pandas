@@ -103,7 +103,7 @@ def test_xarray_cftimeindex_nearest():
     cftime = pytest.importorskip("cftime")
     xarray = pytest.importorskip("xarray")
 
-    times = xarray.cftime_range("0001", periods=2)
+    times = xarray.date_range("0001", periods=2, use_cftime=True)
     key = cftime.DatetimeGregorian(2000, 1, 1)
     result = times.get_indexer([key], method="nearest")
     expected = 1
@@ -162,7 +162,10 @@ def test_seaborn(mpl_cleanup):
     seaborn.stripplot(x="day", y="total_bill", data=tips)
 
 
+@pytest.mark.xfail(reason="pandas_datareader uses old variant of deprecate_kwarg")
 def test_pandas_datareader():
+    # https://github.com/pandas-dev/pandas/pull/61468
+    # https://github.com/pydata/pandas-datareader/issues/1005
     pytest.importorskip("pandas_datareader")
 
 
@@ -269,13 +272,10 @@ def test_from_obscure_array(dtype, box):
     else:
         data = box(arr)
 
-    if not isinstance(data, memoryview):
-        # FIXME(GH#44431) these raise on memoryview and attempted fix
-        #  fails on py3.10
-        func = {"M8[ns]": pd.to_datetime, "m8[ns]": pd.to_timedelta}[dtype]
-        result = func(arr).array
-        expected = func(data).array
-        tm.assert_equal(result, expected)
+    func = {"M8[ns]": pd.to_datetime, "m8[ns]": pd.to_timedelta}[dtype]
+    result = func(arr).array
+    expected = func(data).array
+    tm.assert_equal(result, expected)
 
     # Let's check the Indexes while we're here
     idx_cls = {"M8[ns]": DatetimeIndex, "m8[ns]": TimedeltaIndex}[dtype]

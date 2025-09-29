@@ -20,6 +20,8 @@ from typing import (
     Any,
     Final,
     Literal,
+    Self,
+    TypeAlias,
     cast,
     overload,
 )
@@ -112,7 +114,10 @@ if TYPE_CHECKING:
         Iterator,
         Sequence,
     )
-    from types import TracebackType
+    from types import (
+        ModuleType,
+        TracebackType,
+    )
 
     from tables import (
         Col,
@@ -126,8 +131,6 @@ if TYPE_CHECKING:
         AxisInt,
         DtypeArg,
         FilePath,
-        Self,
-        Shape,
         npt,
     )
 
@@ -160,7 +163,7 @@ def _ensure_str(name):
     return name
 
 
-Term = PyTablesExpr
+Term: TypeAlias = PyTablesExpr
 
 
 def _ensure_term(where, scope_level: int):
@@ -227,7 +230,7 @@ with config.config_prefix("io.hdf"):
     )
 
 # oh the troubles to reduce import time
-_table_mod = None
+_table_mod: ModuleType | None = None
 _table_file_open_policy_is_strict = False
 
 
@@ -3298,18 +3301,16 @@ class GenericFixed(Fixed):
             # store as UTC
             # with a zone
 
-            # error: Item "ExtensionArray" of "Union[Any, ExtensionArray]" has no
-            # attribute "asi8"
+            # error: "ExtensionArray" has no attribute "asi8"
             self._handle.create_array(
                 self.group,
                 key,
-                value.asi8,  # type: ignore[union-attr]
+                value.asi8,  # type: ignore[attr-defined]
             )
 
             node = getattr(self.group, key)
-            # error: Item "ExtensionArray" of "Union[Any, ExtensionArray]" has no
-            # attribute "tz"
-            node._v_attrs.tz = _get_tz(value.tz)  # type: ignore[union-attr]
+            # error: "ExtensionArray" has no attribute "tz"
+            node._v_attrs.tz = _get_tz(value.tz)  # type: ignore[attr-defined]
             node._v_attrs.value_type = f"datetime64[{value.dtype.unit}]"
         elif lib.is_np_dtype(value.dtype, "m"):
             self._handle.create_array(self.group, key, value.view("i8"))
@@ -3383,7 +3384,7 @@ class BlockManagerFixed(GenericFixed):
     nblocks: int
 
     @property
-    def shape(self) -> Shape | None:
+    def shape(self) -> list[int] | None:
         try:
             ndim = self.ndim
 
@@ -5192,8 +5193,7 @@ def _maybe_convert_for_string_atom(
     columns: list[str],
 ):
     if isinstance(bvalues.dtype, StringDtype):
-        # "ndarray[Any, Any]" has no attribute "to_numpy"
-        bvalues = bvalues.to_numpy()  # type: ignore[union-attr]
+        bvalues = bvalues.to_numpy()
     if bvalues.dtype != object:
         return bvalues
 

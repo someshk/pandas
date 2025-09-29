@@ -20,6 +20,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Literal,
+    Self,
     cast,
     overload,
 )
@@ -34,12 +35,16 @@ from pandas._libs import (
 )
 from pandas._libs.lib import is_range_indexer
 from pandas.compat import PYPY
-from pandas.compat._constants import REF_COUNT
+from pandas.compat._constants import (
+    REF_COUNT,
+    WARNING_CHECK_DISABLED,
+)
 from pandas.compat._optional import import_optional_dependency
 from pandas.compat.numpy import function as nv
 from pandas.errors import (
     ChainedAssignmentError,
     InvalidIndexError,
+    Pandas4Warning,
 )
 from pandas.errors.cow import (
     _chained_assignment_method_msg,
@@ -68,7 +73,6 @@ from pandas.core.dtypes.cast import (
     find_common_type,
     infer_dtype_from,
     maybe_box_native,
-    maybe_cast_pointwise_result,
 )
 from pandas.core.dtypes.common import (
     is_dict_like,
@@ -82,7 +86,6 @@ from pandas.core.dtypes.common import (
     validate_all_hashable,
 )
 from pandas.core.dtypes.dtypes import (
-    CategoricalDtype,
     ExtensionDtype,
     SparseDtype,
 )
@@ -115,7 +118,6 @@ from pandas.core.arrays.arrow import (
 )
 from pandas.core.arrays.categorical import CategoricalAccessor
 from pandas.core.arrays.sparse import SparseAccessor
-from pandas.core.arrays.string_ import StringDtype
 from pandas.core.construction import (
     array as pd_array,
     extract_array,
@@ -191,7 +193,6 @@ if TYPE_CHECKING:
         ReindexMethod,
         Renamer,
         Scalar,
-        Self,
         SortKind,
         StorageOptions,
         Suffixes,
@@ -263,7 +264,6 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
         Data type for the output Series. If not specified, this will be
         inferred from `data`.
         See the :ref:`user guide <basics.dtypes>` for more usages.
-        If ``data`` is Series then is ignored.
     name : Hashable, default None
         The name to give to the Series.
     copy : bool, default False
@@ -354,9 +354,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
     __pandas_priority__ = 3000
 
     # Override cache_readonly bc Series is mutable
-    # error: Incompatible types in assignment (expression has type "property",
-    # base class "IndexOpsMixin" defined the type as "Callable[[IndexOpsMixin], bool]")
-    hasnans = property(  # type: ignore[assignment]
+    hasnans = property(
         # error: "Callable[[IndexOpsMixin], bool]" has no attribute "fget"
         base.IndexOpsMixin.hasnans.fget,  # type: ignore[attr-defined]
         doc=base.IndexOpsMixin.hasnans.__doc__,
@@ -387,7 +385,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
                     f"Passing a {type(data).__name__} to {type(self).__name__} "
                     "is deprecated and will raise in a future version. "
                     "Use public APIs instead.",
-                    DeprecationWarning,
+                    Pandas4Warning,
                     stacklevel=2,
                 )
             data = data.copy(deep=False)
@@ -411,7 +409,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
                     f"Passing a {type(data).__name__} to {type(self).__name__} "
                     "is deprecated and will raise in a future version. "
                     "Use public APIs instead.",
-                    DeprecationWarning,
+                    Pandas4Warning,
                     stacklevel=2,
                 )
 
@@ -480,7 +478,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
                     f"Passing a {type(data).__name__} to {type(self).__name__} "
                     "is deprecated and will raise in a future version. "
                     "Use public APIs instead.",
-                    DeprecationWarning,
+                    Pandas4Warning,
                     stacklevel=2,
                 )
                 allow_mgr = True
@@ -765,11 +763,13 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
         array([1, 2, 3])
 
         >>> pd.Series(list("aabc")).values
-        array(['a', 'a', 'b', 'c'], dtype=object)
+        <ArrowStringArray>
+        ['a', 'a', 'b', 'c']
+        Length: 4, dtype: str
 
         >>> pd.Series(list("aabc")).astype("category").values
         ['a', 'a', 'b', 'c']
-        Categories (3, object): ['a', 'b', 'c']
+        Categories (3, str): ['a', 'b', 'c']
 
         Timezone aware datetime data is converted to UTC:
 
@@ -1058,8 +1058,8 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             return self.iloc[loc]
 
     def __setitem__(self, key, value) -> None:
-        if not PYPY:
-            if sys.getrefcount(self) <= 3:
+        if not PYPY and not WARNING_CHECK_DISABLED:
+            if sys.getrefcount(self) <= REF_COUNT + 1:
                 warnings.warn(
                     _chained_assignment_msg, ChainedAssignmentError, stacklevel=2
                 )
@@ -1472,7 +1472,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
     ) -> None: ...
 
     @deprecate_nonkeyword_arguments(
-        version="4.0", allowed_args=["self", "buf"], name="to_string"
+        Pandas4Warning, allowed_args=["self", "buf"], name="to_string"
     )
     def to_string(
         self,
@@ -1630,7 +1630,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
         ),
     )
     @deprecate_nonkeyword_arguments(
-        version="4.0", allowed_args=["self", "buf"], name="to_markdown"
+        Pandas4Warning, allowed_args=["self", "buf"], name="to_markdown"
     )
     def to_markdown(
         self,
@@ -1964,6 +1964,9 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
         )
     )
     @Appender(_shared_docs["groupby"] % _shared_doc_kwargs)
+    @deprecate_nonkeyword_arguments(
+        Pandas4Warning, allowed_args=["self", "by", "level"], name="groupby"
+    )
     def groupby(
         self,
         by=None,
@@ -1971,7 +1974,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
         as_index: bool = True,
         sort: bool = True,
         group_keys: bool = True,
-        observed: bool = False,
+        observed: bool = True,
         dropna: bool = True,
     ) -> SeriesGroupBy:
         from pandas.core.groupby.generic import SeriesGroupBy
@@ -2145,12 +2148,12 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
 
         >>> pd.Series(pd.Categorical(list("baabc"))).unique()
         ['b', 'a', 'c']
-        Categories (3, object): ['a', 'b', 'c']
+        Categories (3, str): ['a', 'b', 'c']
         >>> pd.Series(
         ...     pd.Categorical(list("baabc"), categories=list("abc"), ordered=True)
         ... ).unique()
         ['b', 'a', 'c']
-        Categories (3, object): ['a' < 'b' < 'c']
+        Categories (3, str): ['a' < 'b' < 'c']
         """
         return super().unique()
 
@@ -2514,6 +2517,8 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
         dtype: float64
         """
         nv.validate_round(args, kwargs)
+        if self.dtype == "object":
+            raise TypeError("Expected numeric dtype, got object instead.")
         new_mgr = self._mgr.round(decimals=decimals)
         return self._constructor_from_mgr(new_mgr, axes=new_mgr.axes).__finalize__(
             self, method="round"
@@ -2987,22 +2992,10 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
     # -------------------------------------------------------------------
     # Combination
 
-    def _append(
-        self, to_append, ignore_index: bool = False, verify_integrity: bool = False
-    ):
+    def _append_internal(self, to_append: Series, ignore_index: bool = False) -> Series:
         from pandas.core.reshape.concat import concat
 
-        if isinstance(to_append, (list, tuple)):
-            to_concat = [self]
-            to_concat.extend(to_append)
-        else:
-            to_concat = [self, to_append]
-        if any(isinstance(x, (ABCDataFrame,)) for x in to_concat[1:]):
-            msg = "to_append should be a Series or list/tuple of Series, got DataFrame"
-            raise TypeError(msg)
-        return concat(
-            to_concat, ignore_index=ignore_index, verify_integrity=verify_integrity
-        )
+        return concat([self, to_append], ignore_index=ignore_index)
 
     @doc(
         _shared_docs["compare"],
@@ -3181,15 +3174,14 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
                 new_values[:] = [func(lv, other) for lv in self._values]
             new_name = self.name
 
-        # try_float=False is to match agg_series
-        npvalues = lib.maybe_convert_objects(new_values, try_float=False)
-        # same_dtype here is a kludge to avoid casting e.g. [True, False] to
-        #  ["True", "False"]
-        same_dtype = isinstance(self.dtype, (StringDtype, CategoricalDtype))
-        res_values = maybe_cast_pointwise_result(
-            npvalues, self.dtype, same_dtype=same_dtype
+        res_values = self.array._cast_pointwise_result(new_values)
+        return self._constructor(
+            res_values,
+            dtype=res_values.dtype,
+            index=new_index,
+            name=new_name,
+            copy=False,
         )
-        return self._constructor(res_values, index=new_index, name=new_name, copy=False)
 
     def combine_first(self, other) -> Series:
         """
@@ -3335,7 +3327,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
         2    3
         dtype: int64
         """
-        if not PYPY:
+        if not PYPY and not WARNING_CHECK_DISABLED:
             if sys.getrefcount(self) <= REF_COUNT:
                 warnings.warn(
                     _chained_assignment_method_msg,
@@ -4326,6 +4318,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
         self,
         func: Callable | Mapping | Series | None = None,
         na_action: Literal["ignore"] | None = None,
+        engine: Callable | None = None,
         **kwargs,
     ) -> Series:
         """
@@ -4342,6 +4335,25 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
         na_action : {None, 'ignore'}, default None
             If 'ignore', propagate NaN values, without passing them to the
             mapping correspondence.
+        engine : decorator, optional
+            Choose the execution engine to use to run the function. Only used for
+            functions. If ``map`` is called with a mapping or ``Series``, an
+            exception will be raised. If ``engine`` is not provided the function will
+            be executed by the regular Python interpreter.
+
+            Options include JIT compilers such as Numba, Bodo or Blosc2, which in some
+            cases can speed up the execution. To use an executor you can provide the
+            decorators ``numba.jit``, ``numba.njit``, ``bodo.jit`` or ``blosc2.jit``.
+            You can also provide the decorator with parameters, like
+            ``numba.jit(nogit=True)``.
+
+            Not all functions can be executed with all execution engines. In general,
+            JIT compilers will require type stability in the function (no variable
+            should change data type during the execution). And not all pandas and
+            NumPy APIs are supported. Check the engine documentation for limitations.
+
+            .. versionadded:: 3.0.0
+
         **kwargs
             Additional keyword arguments to pass as keywords arguments to
             `arg`.
@@ -4412,14 +4424,34 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             if "arg" in kwargs:
                 # `.map(arg=my_func)`
                 func = kwargs.pop("arg")
+                # https://github.com/pandas-dev/pandas/pull/61264
                 warnings.warn(
                     "The parameter `arg` has been renamed to `func`, and it "
                     "will stop being supported in a future version of pandas.",
-                    FutureWarning,
+                    Pandas4Warning,
                     stacklevel=find_stack_level(),
                 )
             else:
                 raise ValueError("The `func` parameter is required")
+
+        if engine is not None:
+            if not callable(func):
+                raise ValueError(
+                    "The engine argument can only be specified when func is a function"
+                )
+            if not hasattr(engine, "__pandas_udf__"):
+                raise ValueError(f"Not a valid engine: {engine!r}")
+            result = engine.__pandas_udf__.map(  # type: ignore[attr-defined]
+                data=self,
+                func=func,
+                args=(),
+                kwargs=kwargs,
+                decorator=engine,
+                skip_na=na_action == "ignore",
+            )
+            if not isinstance(result, Series):
+                result = Series(result, index=self.index, name=self.name)
+            return result.__finalize__(self, method="map")
 
         if callable(func):
             func = functools.partial(func, **kwargs)
@@ -6643,7 +6675,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             filter_type="bool",
         )
 
-    @deprecate_nonkeyword_arguments(version="4.0", allowed_args=["self"], name="all")
+    @deprecate_nonkeyword_arguments(Pandas4Warning, allowed_args=["self"], name="all")
     @Appender(make_doc("all", ndim=1))
     def all(
         self,
@@ -6663,7 +6695,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             filter_type="bool",
         )
 
-    @deprecate_nonkeyword_arguments(version="4.0", allowed_args=["self"], name="min")
+    @deprecate_nonkeyword_arguments(Pandas4Warning, allowed_args=["self"], name="min")
     def min(
         self,
         axis: Axis | None = 0,
@@ -6734,7 +6766,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             self, axis=axis, skipna=skipna, numeric_only=numeric_only, **kwargs
         )
 
-    @deprecate_nonkeyword_arguments(version="4.0", allowed_args=["self"], name="max")
+    @deprecate_nonkeyword_arguments(Pandas4Warning, allowed_args=["self"], name="max")
     def max(
         self,
         axis: Axis | None = 0,
@@ -6805,7 +6837,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             self, axis=axis, skipna=skipna, numeric_only=numeric_only, **kwargs
         )
 
-    @deprecate_nonkeyword_arguments(version="4.0", allowed_args=["self"], name="sum")
+    @deprecate_nonkeyword_arguments(Pandas4Warning, allowed_args=["self"], name="sum")
     def sum(
         self,
         axis: Axis | None = None,
@@ -6906,7 +6938,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             **kwargs,
         )
 
-    @deprecate_nonkeyword_arguments(version="4.0", allowed_args=["self"], name="prod")
+    @deprecate_nonkeyword_arguments(Pandas4Warning, allowed_args=["self"], name="prod")
     @doc(make_doc("prod", ndim=1))
     def prod(
         self,
@@ -6925,7 +6957,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             **kwargs,
         )
 
-    @deprecate_nonkeyword_arguments(version="4.0", allowed_args=["self"], name="mean")
+    @deprecate_nonkeyword_arguments(Pandas4Warning, allowed_args=["self"], name="mean")
     def mean(
         self,
         axis: Axis | None = 0,
@@ -6979,7 +7011,9 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             self, axis=axis, skipna=skipna, numeric_only=numeric_only, **kwargs
         )
 
-    @deprecate_nonkeyword_arguments(version="4.0", allowed_args=["self"], name="median")
+    @deprecate_nonkeyword_arguments(
+        Pandas4Warning, allowed_args=["self"], name="median"
+    )
     def median(
         self,
         axis: Axis | None = 0,
@@ -7060,7 +7094,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             self, axis=axis, skipna=skipna, numeric_only=numeric_only, **kwargs
         )
 
-    @deprecate_nonkeyword_arguments(version="4.0", allowed_args=["self"], name="sem")
+    @deprecate_nonkeyword_arguments(Pandas4Warning, allowed_args=["self"], name="sem")
     @doc(make_doc("sem", ndim=1))
     def sem(
         self,
@@ -7079,7 +7113,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             **kwargs,
         )
 
-    @deprecate_nonkeyword_arguments(version="4.0", allowed_args=["self"], name="var")
+    @deprecate_nonkeyword_arguments(Pandas4Warning, allowed_args=["self"], name="var")
     def var(
         self,
         axis: Axis | None = None,
@@ -7166,7 +7200,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             **kwargs,
         )
 
-    @deprecate_nonkeyword_arguments(version="4.0", allowed_args=["self"], name="std")
+    @deprecate_nonkeyword_arguments(Pandas4Warning, allowed_args=["self"], name="std")
     @doc(make_doc("std", ndim=1))
     def std(
         self,
@@ -7185,7 +7219,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             **kwargs,
         )
 
-    @deprecate_nonkeyword_arguments(version="4.0", allowed_args=["self"], name="skew")
+    @deprecate_nonkeyword_arguments(Pandas4Warning, allowed_args=["self"], name="skew")
     @doc(make_doc("skew", ndim=1))
     def skew(
         self,
@@ -7198,7 +7232,7 @@ class Series(base.IndexOpsMixin, NDFrame):  # type: ignore[misc]
             self, axis=axis, skipna=skipna, numeric_only=numeric_only, **kwargs
         )
 
-    @deprecate_nonkeyword_arguments(version="4.0", allowed_args=["self"], name="kurt")
+    @deprecate_nonkeyword_arguments(Pandas4Warning, allowed_args=["self"], name="kurt")
     def kurt(
         self,
         axis: Axis | None = 0,

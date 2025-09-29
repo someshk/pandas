@@ -427,6 +427,15 @@ with cf.config_prefix("mode"):
         validator=is_one_of_factory([True, False, "warn"]),
     )
 
+    cf.register_option(
+        "nan_is_na",
+        os.environ.get("PANDAS_NAN_IS_NA", "1") == "1",
+        "Whether to treat NaN entries as interchangeable with pd.NA in "
+        "numpy-nullable and pyarrow float dtypes. See discussion in "
+        "https://github.com/pandas-dev/pandas/issues/32265",
+        validator=is_one_of_factory([True, False]),
+    )
+
 
 # user warnings
 chained_assignment = """
@@ -880,7 +889,7 @@ with cf.config_prefix("styler"):
 with cf.config_prefix("future"):
     cf.register_option(
         "infer_string",
-        True if os.environ.get("PANDAS_FUTURE_INFER_STRING", "0") == "1" else False,
+        False if os.environ.get("PANDAS_FUTURE_INFER_STRING", "1") == "0" else True,
         "Whether to infer sequence of str objects as pyarrow string "
         "dtype, which will be the default in pandas 3.0 "
         "(at which point this option will be deprecated).",

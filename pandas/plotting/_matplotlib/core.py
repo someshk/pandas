@@ -101,7 +101,7 @@ if TYPE_CHECKING:
 
 
 def holds_integer(column: Index) -> bool:
-    return column.inferred_type in {"integer", "mixed-integer"}
+    return column.dtype.kind in "iu"
 
 
 def _color_in_style(style: str) -> bool:
@@ -802,7 +802,13 @@ class MPLPlot(ABC):
         if self.title:
             if self.subplots:
                 if is_list_like(self.title):
-                    if len(self.title) != self.nseries:
+                    if not isinstance(self.subplots, bool):
+                        if len(self.subplots) != len(self.title):
+                            raise ValueError(
+                                f"The number of titles ({len(self.title)}) must equal "
+                                f"the number of subplots ({len(self.subplots)})."
+                            )
+                    elif len(self.title) != self.nseries:
                         raise ValueError(
                             "The length of `title` must equal the number "
                             "of columns if using `title` of type `list` "
@@ -811,7 +817,7 @@ class MPLPlot(ABC):
                             f"number of columns = {self.nseries}"
                         )
 
-                    for ax, title in zip(self.axes, self.title):
+                    for ax, title in zip(self.axes, self.title, strict=False):
                         ax.set_title(title)
                 else:
                     fig.suptitle(self.title)
@@ -924,7 +930,9 @@ class MPLPlot(ABC):
         """
         leg = ax.get_legend()
 
-        other_ax = getattr(ax, "left_ax", None) or getattr(ax, "right_ax", None)
+        other_ax = cast(
+            "Axes", getattr(ax, "left_ax", None) or getattr(ax, "right_ax", None)
+        )
         other_leg = None
         if other_ax is not None:
             other_leg = other_ax.get_legend()
@@ -1208,7 +1216,7 @@ class MPLPlot(ABC):
     ) -> dict[str, Any]:
         errors = {}
 
-        for kw, flag in zip(["xerr", "yerr"], [xerr, yerr]):
+        for kw, flag in zip(["xerr", "yerr"], [xerr, yerr], strict=True):
             if flag:
                 err = self.errors[kw]
                 # user provided label-matched dataframe of errors
@@ -1449,7 +1457,7 @@ class ScatterPlot(PlanePlot):
         cmap = mpl.colormaps.get_cmap(self.colormap)
         colors = cmap(np.linspace(0, 1, n_colors))  # RGB tuples
 
-        return dict(zip(unique, colors))
+        return dict(zip(unique, colors, strict=True))
 
     def _get_norm_and_cmap(self, c_values, color_by_categorical: bool):
         c = self.c
@@ -1934,13 +1942,14 @@ class BarPlot(MPLPlot):
 
         self.subplots: list[Any]
 
-        if bool(self.subplots) and self.stacked:
-            for i, sub_plot in enumerate(self.subplots):
-                if len(sub_plot) <= 1:
-                    continue
-                for plot in sub_plot:
-                    _stacked_subplots_ind[int(plot)] = i
-                _stacked_subplots_offsets.append([0, 0])
+        if not isinstance(self.subplots, bool):
+            if bool(self.subplots) and self.stacked:
+                for i, sub_plot in enumerate(self.subplots):
+                    if len(sub_plot) <= 1:
+                        continue
+                    for plot in sub_plot:
+                        _stacked_subplots_ind[int(plot)] = i
+                    _stacked_subplots_offsets.append([0, 0])
 
         for i, (label, y) in enumerate(self._iter_data(data=data)):
             ax = self._get_ax(i)
@@ -1970,7 +1979,7 @@ class BarPlot(MPLPlot):
 
             if i in _stacked_subplots_ind:
                 offset_index = _stacked_subplots_ind[i]
-                pos_prior, neg_prior = _stacked_subplots_offsets[offset_index]  # type:ignore[assignment]
+                pos_prior, neg_prior = _stacked_subplots_offsets[offset_index]  # type: ignore[assignment]
                 mask = y >= 0
                 start = np.where(mask, pos_prior, neg_prior) + self._start_base
                 w = self.bar_width / 2
@@ -2169,7 +2178,10 @@ class PiePlot(MPLPlot):
             # Blank out labels for values of 0 so they don't overlap
             # with nonzero wedges
             if labels is not None:
-                blabels = [blank_labeler(left, value) for left, value in zip(labels, y)]
+                blabels = [
+                    blank_labeler(left, value)
+                    for left, value in zip(labels, y, strict=True)
+                ]
             else:
                 blabels = None
             results = ax.pie(y, labels=blabels, **kwds)
@@ -2188,7 +2200,7 @@ class PiePlot(MPLPlot):
 
             # leglabels is used for legend labels
             leglabels = labels if labels is not None else idx
-            for _patch, _leglabel in zip(patches, leglabels):
+            for _patch, _leglabel in zip(patches, leglabels, strict=True):
                 self._append_legend_handles_labels(_patch, _leglabel)
 
     def _post_plot_logic(self, ax: Axes, data) -> None:

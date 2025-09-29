@@ -4,6 +4,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Literal,
+    Self,
     cast,
     overload,
 )
@@ -11,7 +12,10 @@ import warnings
 
 import numpy as np
 
+from pandas._config import is_nan_na
+
 from pandas._libs import (
+    algos as libalgos,
     lib,
     missing as libmissing,
 )
@@ -24,6 +28,7 @@ from pandas.errors import AbstractMethodError
 from pandas.util._decorators import doc
 
 from pandas.core.dtypes.base import ExtensionDtype
+from pandas.core.dtypes.cast import maybe_downcast_to_dtype
 from pandas.core.dtypes.common import (
     is_bool,
     is_integer_dtype,
@@ -59,6 +64,7 @@ from pandas.core.array_algos import (
     masked_reductions,
 )
 from pandas.core.array_algos.quantile import quantile_with_mask
+from pandas.core.array_algos.transforms import shift
 from pandas.core.arraylike import OpsMixin
 from pandas.core.arrays._utils import to_numpy_dtype_inference
 from pandas.core.arrays.base import ExtensionArray
@@ -92,7 +98,6 @@ if TYPE_CHECKING:
         PositionalIndexer,
         Scalar,
         ScalarIndexer,
-        Self,
         SequenceIndexer,
         Shape,
         npt,
@@ -144,6 +149,21 @@ class BaseMaskedArray(OpsMixin, ExtensionArray):
     def _from_sequence(cls, scalars, *, dtype=None, copy: bool = False) -> Self:
         values, mask = cls._coerce_to_array(scalars, dtype=dtype, copy=copy)
         return cls(values, mask)
+
+    def _cast_pointwise_result(self, values) -> ArrayLike:
+        if isna(values).all():
+            return type(self)._from_sequence(values, dtype=self.dtype)
+        values = np.asarray(values, dtype=object)
+        result = lib.maybe_convert_objects(values, convert_to_nullable_dtype=True)
+        lkind = self.dtype.kind
+        rkind = result.dtype.kind
+        if (lkind in "iu" and rkind in "iu") or (lkind == rkind == "f"):
+            result = cast(BaseMaskedArray, result)
+            new_data = maybe_downcast_to_dtype(
+                result._data, dtype=self.dtype.numpy_dtype
+            )
+            result = type(result)(new_data, result._mask)
+        return result
 
     @classmethod
     @doc(ExtensionArray._empty)
@@ -308,7 +328,9 @@ class BaseMaskedArray(OpsMixin, ExtensionArray):
     def __contains__(self, key) -> bool:
         if isna(key) and key is not self.dtype.na_value:
             # GH#52840
-            if self._data.dtype.kind == "f" and lib.is_float(key):
+            if lib.is_float(key) and is_nan_na():
+                key = self.dtype.na_value
+            elif self._data.dtype.kind == "f" and lib.is_float(key):
                 return bool((np.isnan(self._data) & ~self._mask).any())
 
         return bool(super().__contains__(key))
@@ -360,6 +382,17 @@ class BaseMaskedArray(OpsMixin, ExtensionArray):
         data = self._data.ravel(*args, **kwargs)
         mask = self._mask.ravel(*args, **kwargs)
         return type(self)(data, mask)
+
+    def shift(self, periods: int = 1, fill_value=None) -> Self:
+        # NB: shift is always along axis=0
+        axis = 0
+        if fill_value is None:
+            new_data = shift(self._data, periods, axis, 0)
+            new_mask = shift(self._mask, periods, axis, True)
+        else:
+            new_data = shift(self._data, periods, axis, fill_value)
+            new_mask = shift(self._mask, periods, axis, False)
+        return type(self)(new_data, new_mask)
 
     @property
     def T(self) -> Self:
@@ -655,6 +688,8 @@ class BaseMaskedArray(OpsMixin, ExtensionArray):
                     # reached in e.g. np.sqrt on BooleanArray
                     # we don't support float16
                     x = x.astype(np.float32)
+                if is_nan_na():
+                    m[np.isnan(x)] = True
                 return FloatingArray(x, m)
             else:
                 x[mask] = np.nan
@@ -686,8 +721,7 @@ class BaseMaskedArray(OpsMixin, ExtensionArray):
         # make this faster by having an optional mask, but not have to change
         # source code using it..
 
-        # error: Incompatible return value type (got "bool_", expected "bool")
-        return self._mask.any()  # type: ignore[return-value]
+        return bool(self._mask.any())
 
     def _propagate_mask(
         self, mask: npt.NDArray[np.bool_] | None, other
@@ -701,9 +735,7 @@ class BaseMaskedArray(OpsMixin, ExtensionArray):
                 mask = mask | isna(other)
         else:
             mask = self._mask | mask
-        # Incompatible return value type (got "Optional[ndarray[Any, dtype[bool_]]]",
-        # expected "ndarray[Any, dtype[bool_]]")
-        return mask  # type: ignore[return-value]
+        return mask
 
     def _arith_method(self, other, op):
         op_name = op.__name__
@@ -767,6 +799,10 @@ class BaseMaskedArray(OpsMixin, ExtensionArray):
                 #  will be all-True, but since this is division, we want
                 #  to end up with floating dtype.
                 result = result.astype(np.float64)
+            elif op_name in {"divmod", "rdivmod"}:
+                # GH#62196
+                res = self._maybe_mask_result(result, mask)
+                return res, res.copy()
         else:
             # Make sure we do this before the "pow" mask checks
             #  to get an expected exception message on shape mismatch.
@@ -859,6 +895,9 @@ class BaseMaskedArray(OpsMixin, ExtensionArray):
 
         if result.dtype.kind == "f":
             from pandas.core.arrays import FloatingArray
+
+            if is_nan_na():
+                mask[np.isnan(result)] = True
 
             return FloatingArray(result, mask, copy=False)
 
@@ -979,6 +1018,49 @@ class BaseMaskedArray(OpsMixin, ExtensionArray):
         data = self._data.copy()
         mask = self._mask.copy()
         return self._simple_new(data, mask)
+
+    def _rank(
+        self,
+        *,
+        axis: AxisInt = 0,
+        method: str = "average",
+        na_option: str = "keep",
+        ascending: bool = True,
+        pct: bool = False,
+    ):
+        # GH#62043 Avoid going through copy-making ensure_data in algorithms.rank
+        if axis != 0 or self.ndim != 1:
+            raise NotImplementedError
+
+        from pandas.core.arrays import FloatingArray
+
+        data = self._data
+        if data.dtype.kind == "b":
+            data = data.view("uint8")
+
+        result = libalgos.rank_1d(
+            data,
+            is_datetimelike=False,
+            ties_method=method,
+            ascending=ascending,
+            na_option=na_option,
+            pct=pct,
+            mask=self.isna(),
+        )
+        if na_option in ["top", "bottom"]:
+            mask = np.zeros(self.shape, dtype=bool)
+        else:
+            mask = self._mask.copy()
+
+        if method != "average" and not pct:
+            if na_option not in ["top", "bottom"]:
+                result[self._mask] = 0  # avoid warning on casting
+            result = result.astype("uint64", copy=False)
+            from pandas.core.arrays import IntegerArray
+
+            return IntegerArray(result, mask=mask)
+
+        return FloatingArray(result, mask=mask)
 
     @doc(ExtensionArray.duplicated)
     def duplicated(

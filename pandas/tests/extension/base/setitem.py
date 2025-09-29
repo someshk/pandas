@@ -1,6 +1,8 @@
 import numpy as np
 import pytest
 
+from pandas.core.dtypes.common import is_hashable
+
 import pandas as pd
 import pandas._testing as tm
 
@@ -134,13 +136,13 @@ class BaseSetitemTests:
 
     def test_setitem_iloc_scalar_single(self, data):
         df = pd.DataFrame({"B": data})
-        df.iloc[10, 0] = data[1]
-        assert df.loc[10, "B"] == data[1]
+        df.iloc[9, 0] = data[1]
+        assert df.loc[9, "B"] == data[1]
 
     def test_setitem_iloc_scalar_multiple_homogoneous(self, data):
         df = pd.DataFrame({"A": data, "B": data})
-        df.iloc[10, 1] = data[1]
-        assert df.loc[10, "B"] == data[1]
+        df.iloc[9, 1] = data[1]
+        assert df.loc[9, "B"] == data[1]
 
     @pytest.mark.parametrize(
         "mask",
@@ -279,9 +281,9 @@ class BaseSetitemTests:
         else:  # __setitem__
             target = ser
 
-        target[mask] = data[10]
-        assert ser[0] == data[10]
-        assert ser[1] == data[10]
+        target[mask] = data[9]
+        assert ser[0] == data[9]
+        assert ser[1] == data[9]
 
     def test_setitem_expand_columns(self, data):
         df = pd.DataFrame({"A": data})
@@ -309,6 +311,22 @@ class BaseSetitemTests:
         result = df.copy()
         result.loc[:, "B"] = data
         tm.assert_frame_equal(result, expected)
+
+    def test_loc_setitem_with_expansion_preserves_ea_index_dtype(self, data):
+        # GH#41626 retain index.dtype in setitem-with-expansion
+        if not is_hashable(data[0]):
+            pytest.skip("Test does not apply to non-hashable data.")
+        data = data.unique()
+        expected = pd.DataFrame({"A": range(len(data))}, index=data)
+        df = expected.iloc[:-1]
+        ser = df["A"]
+        item = data[-1]
+
+        df.loc[item] = len(data) - 1
+        tm.assert_frame_equal(df, expected)
+
+        ser.loc[item] = len(data) - 1
+        tm.assert_series_equal(ser, expected["A"])
 
     def test_setitem_frame_invalid_length(self, data):
         df = pd.DataFrame({"A": [1] * len(data)})
@@ -440,11 +458,11 @@ class BaseSetitemTests:
         tm.assert_series_equal(ser, expected)
 
     def test_setitem_invalid(self, data, invalid_scalar):
-        msg = ""  # messages vary by subclass, so we do not test it
-        with pytest.raises((ValueError, TypeError), match=msg):
+        # messages vary by subclass, so we do not test it
+        with pytest.raises((ValueError, TypeError), match=None):
             data[0] = invalid_scalar
 
-        with pytest.raises((ValueError, TypeError), match=msg):
+        with pytest.raises((ValueError, TypeError), match=None):
             data[:] = invalid_scalar
 
     def test_setitem_2d_values(self, data):
