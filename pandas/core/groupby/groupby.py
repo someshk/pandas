@@ -682,7 +682,10 @@ class BaseGroupBy(PandasObject, SelectionMixin[NDFrameT], GroupByIndexingMixin):
                     raise ValueError(msg) from err
 
             converters = (get_converter(s) for s in index_sample)
-            names = (tuple(f(n) for f, n in zip(converters, name)) for name in names)
+            names = (
+                tuple(f(n) for f, n in zip(converters, name, strict=True))
+                for name in names
+            )
 
         else:
             converter = get_converter(index_sample)
@@ -1235,6 +1238,7 @@ class GroupBy(BaseGroupBy[NDFrameT]):
             zip(
                 reversed(self._grouper.names),
                 self._grouper.get_group_levels(),
+                strict=True,
             )
         ):
             if name is None:
@@ -4321,7 +4325,7 @@ class GroupBy(BaseGroupBy[NDFrameT]):
     def _nth(
         self,
         n: PositionalIndexer | tuple,
-        dropna: Literal["any", "all", None] = None,
+        dropna: Literal["any", "all"] | None = None,
     ) -> NDFrameT:
         if not dropna:
             mask = self._make_mask_from_positional_indexer(n)
