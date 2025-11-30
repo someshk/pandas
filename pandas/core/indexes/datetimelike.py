@@ -75,6 +75,7 @@ if TYPE_CHECKING:
     from pandas._typing import (
         Axis,
         JoinHow,
+        TimeUnit,
         npt,
     )
 
@@ -119,7 +120,7 @@ class DatetimeIndexOpsMixin(NDArrayBackedExtensionIndex, ABC):
                        '2022-02-22 06:22:22-06:00', '2022-02-22 07:22:22-06:00',
                        '2022-02-22 08:22:22-06:00', '2022-02-22 09:22:22-06:00',
                        '2022-02-22 10:22:22-06:00', '2022-02-22 11:22:22-06:00'],
-                      dtype='datetime64[ns, America/Chicago]', freq='h')
+                      dtype='datetime64[us, America/Chicago]', freq='h')
         >>> datetimeindex.freq
         <Hour>
         """
@@ -434,10 +435,10 @@ class DatetimeTimedeltaMixin(DatetimeIndexOpsMixin, ABC):
     _is_unique = Index.is_unique
 
     @property
-    def unit(self) -> str:
+    def unit(self) -> TimeUnit:
         return self._data.unit
 
-    def as_unit(self, unit: str) -> Self:
+    def as_unit(self, unit: TimeUnit) -> Self:
         """
         Convert to a dtype with the given unit resolution.
 
